@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+	<html>
+		<head>
+			<title>Rotating Plank</title>
+			<link rel="stylesheet" href="./css/lever.css">
+			<script src="./js/THREEx.DomEvents.js"></script>
+			<script src="./js/THREEx.WindowResize.js"></script>
+			<script src="./js/three.min.js"></script>
+			<script src="./js/Projector.js"></script>
+			<script src="./js/plankListeners.js"></script>
+			<script src="./js/dat.gui.min.js"></script>
+			<script src="./js/TrackballControls.js"></script>
+			<script src="./js/plankFunctions.js"></script>
+			<script src="./js/CanvasRenderer.js"></script>
+			<script src="./js/Detector.js"></script>
+		</head>
+		<body>
+			<script>
+			
+				var scene = new THREE.Scene();
+				var aspect = window.innerWidth/ window.innerHeight;
+				var camera = new THREE.PerspectiveCamera(100, aspect, .1, 1000);
+				var renderer = Detector.webgl? new THREE.WebGLRenderer(): new THREE.CanvasRenderer();
+				var domEvents = new THREEx.DomEvents(camera, renderer.domElement);
+				var light = [];
+				var x_axis = new THREE.Vector3(1,0,0);
+				var y_axis = new THREE.Vector3(0,1,0);
+				var z_axis = new THREE.Vector3(0,0,1);
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				document.body.appendChild( renderer.domElement );
+				var controls = new THREE.TrackballControls( camera,  renderer.domElement );
+				controls.enabled = false;
+				var windowResize = THREEx.WindowResize(renderer, camera);
+				camera.position.z = 7;
+				var d = new Date();
+				var leverProps={
+					mass:6,
+					len:2,
+					width:.4, 
+					vel:1.0
+					};
+					leverProps.I =leverProps.mass*leverProps.len*leverProps.len/12;
+				
+				
+				var gui = new dat.GUI();
+				var guiParams = {
+					orbitControls:false,
+					forceMagnitude:2.5,
+					forceOffset:1.0,
+					resetControls: function(){
+						controls.reset();
+						camera.position.z = 7;
+						},
+					torqueView:false,
+					angMomView:false,
+					angVelView:false,
+					maView:false,
+					loaView:false,
+					radView:false,
+					animate:true,
+					resetAnimation: function(){reset();},
+					torque:1.25,
+					kick: function(){kick();},
+					
+				};
+				var camFolder = gui.addFolder('Camera Controls');
+					var camControls = camFolder.add(guiParams, 'orbitControls').name("Camera Controls");
+					camFolder.add(guiParams, 'resetControls').name("Reset Camera");
+				gui.add(leverProps, 'I').name("&Iota; [kg*m^2]")
+				var fMagControls = gui.add(guiParams, 'forceMagnitude',0,10).name("F [N]").listen();
+				var offSet = gui.add(guiParams, 'forceOffset', -1.0,1.0).step(.1).name("Offset [m]").listen();
+				var torqueValue = gui.add(guiParams, 'torque').name("&Tau; [Nm]").listen();
+				var angVel = gui.add(leverProps, 'vel').name('&omega; [rad/s]').listen();
+				gui.add(guiParams, 'kick').name("Kick (1 sec)");
+				var displayFolder = gui.addFolder('Display');
+					var torqueDisplay = displayFolder.add(guiParams, 'torqueView').name("Torque");
+					var angMomDisplay = displayFolder.add(guiParams, 'angMomView').name("Ang. Momentum");
+				gui.add(guiParams, 'resetAnimation').name("Reset Animation");
+					
+
+				guiParams.forceOffset =0.0;
+				leverProps.vel = 0.0;
+				light.push(new THREE.PointLight( 0xffffff, 3, 100 ));
+				light[0].position.set( 0,0,-10 );
+				light.push(new THREE.PointLight( 0xffffff, 3, 100 ));
+				light[1].position.set(0,0,10);
+				light.push(new THREE.PointLight( 0xffffff, 3, 100 ));
+				light[2].position.set(5,5,5);
+				light.push(new THREE.PointLight( 0xfcd440, 5, 150));
+				light[3].position.set(45,50,40);
+				scene.add( light[0],light[1], light[2], light[3] );
+								
+				
+				controls.rotateSpeed = 1.0;
+				controls.zoomSpeed = 1.2;
+				controls.panSpeed = 0.8;
+				controls.noZoom = false;
+				controls.noPan = false;
+				controls.staticMoving = false;
+				controls.dynamicDampingFactor = 0.3;
+				
+				
+				var axisHelper = new THREE.AxisHelper(40);
+				scene.add(axisHelper);
+				
+				
+				var lever = new THREE.Object3D();
+				leverGeom = new THREE.BoxGeometry(5*leverProps.len, .25, 5*leverProps.width, 32);
+				leverMeshMaterial = new THREE.MeshPhongMaterial({
+						color:0x1a1aff,
+						emissive: 0x072535,
+						side: THREE.DoubleSide,
+						shading:THREE.FlatShading
+				});
+				lever.add(new THREE.Mesh(leverGeom, leverMeshMaterial));
+
+				var forceVect=new THREE.Object3D();
+				var forceGeom = generateForceGeom(guiParams.forceMagnitude);
+				forceMaterial = new THREE.MeshPhongMaterial({
+						color:0xff0000,
+						emissive: 0x072535,
+						side: THREE.DoubleSide,
+						shading:THREE.FlatShading
+					});
+					
+				forceVect.add(new THREE.Mesh(forceGeom, forceMaterial));
+				forceVect.position.setY(.25);
+				lever.add(forceVect);
+				scene.add(lever);
+				var sky = new THREE.Object3D();
+				var skyGeom = new THREE.BoxGeometry(100,100,100,1,1,1);
+				var skyMaterial = new THREE.MeshBasicMaterial({
+					color:0x87CEFF,
+					side:THREE.DoubleSide,
+					shading:THREE.FlatShading
+				});
+				sky.add(new THREE.Mesh(skyGeom, skyMaterial));
+				
+				scene.add(sky);
+				
+				var torque = new THREE.Object3D();
+				var torqueGeom = generateTorqueGeom(forceVect,lever);
+				var torqueMaterial = new THREE.MeshPhongMaterial({
+						color:0x00ff00,
+						emissive: 0x072535,
+						side: THREE.DoubleSide,
+						shading:THREE.FlatShading
+				});
+				torque.add(new THREE.Mesh(torqueGeom, torqueMaterial));
+				torque.rotation.x = -Math.PI/2;				
+				
+				var angMom = new THREE.Object3D();
+				var angMomGeom = generateForceGeom(Math.abs(leverProps.I*leverProps.vel));
+				var angMomMaterial = new THREE.MeshPhongMaterial({
+					color: 0x4B0082,
+					emissive: 0x584E56,
+					side: THREE.DoubleSide,
+					shading:THREE.FlatShading
+				});
+				angMom.add(new THREE.Mesh(angMomGeom, angMomMaterial));
+				
+				initializeListeners();
+				var render = function(){
+					requestAnimationFrame(render);
+					controls.update();
+					if(guiParams.animate){
+						advanceFrame();
+					}
+					renderer.render( scene, camera);
+				};
+				
+				render();
+				
+			</script>
+		</body>
+	</html>
